@@ -92,6 +92,30 @@ for (const k of [2, 3]) {
   assert(v.tiles.slice(1).every((t) => !t.revealed && t.n === null));
 }
 
+// 6c. 枚数上限：2〜3人で上限 k なら k 枚当てた時点で交代。4〜5人は設定に関係なく1枚
+for (const k of [1, 2, 3]) {
+  for (const n of [2, 3]) {
+    const s = g.createGame(mk(n), Math.random, { hitLimit: k });
+    const p = cur(s);
+    for (let i = 0; i < k; i++) {
+      assert.strictEqual(cur(s).id, p.id);
+      g.guess(s, p.id, hasN(p));
+    }
+    assert.notStrictEqual(cur(s).id, p.id, `上限${k}枚で交代しない`);
+    assert.strictEqual(s.hitsThisTurn, 0);
+    assert.strictEqual(p.tiles.filter((t) => t.revealed).length, k);
+  }
+}
+{
+  const s = g.createGame(mk(4), Math.random, { hitLimit: 3 });
+  const p = cur(s);
+  g.guess(s, p.id, hasN(p));
+  assert.notStrictEqual(cur(s).id, p.id);
+  // 不正な設定値は無制限扱い／無制限なら viewFor は null
+  const u = g.createGame(mk(2), Math.random, { hitLimit: 99 });
+  assert.strictEqual(g.viewFor(u, u.players[0].id).maxHits, null);
+}
+
 // 7. 全員が常に正解し続ければ最後に勝者が出て、終了後は伏せも公開される
 for (const k of [2, 3, 4, 5]) {
   const s = g.createGame(mk(k));

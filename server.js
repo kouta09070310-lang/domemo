@@ -51,7 +51,7 @@ function getOrCreateRoom(code) {
   let r = rooms.get(code);
   if (!r) {
     if (rooms.size >= MAX_ROOMS) return null;
-    r = { code, members: [], state: null, emptyTimer: null };
+    r = { code, members: [], state: null, emptyTimer: null, hitLimit: 0 }; // hitLimit 0 = 無制限（公式）
     rooms.set(code, r);
   }
   return r;
@@ -76,6 +76,7 @@ function broadcast(r) {
     if (!m.socketId) continue;
     io.to(m.socketId).emit('update', {
       room: r.code,
+      hitLimit: r.hitLimit,
       me: idOf(m),
       members,
       game: r.state ? game.viewFor(r.state, idOf(m)) : null,
@@ -128,7 +129,17 @@ io.on('connection', (socket) => {
     if (!r || !member || playing(r)) return;
     const n = r.members.length;
     if (n < 2 || n > 5) return socket.emit('errorMsg', '2〜5人で開始できます');
-    r.state = game.createGame(r.members.map((m) => ({ id: idOf(m), name: m.name })));
+    r.state = game.createGame(r.members.map((m) => ({ id: idOf(m), name: m.name })), Math.random, { hitLimit: r.hitLimit });
+    broadcast(r);
+  });
+
+  // 部屋の設定：1ターンに当てられる枚数（ロビーでのみ変更可、全員に反映）
+  socket.on('setHitLimit', (v) => {
+    const r = room;
+    if (!r || !member || r.state) return;
+    v = Number(v);
+    if (!game.HIT_LIMITS.includes(v)) return;
+    r.hitLimit = v;
     broadcast(r);
   });
 

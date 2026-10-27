@@ -27,10 +27,16 @@ function shuffle(arr, rng) {
   return a;
 }
 
+// 1ターンに当てられる枚数の設定値（0 = 無制限＝公式ルール）
+const HIT_LIMITS = [0, 1, 2, 3];
+
 // ゲーム開始。players: [{id, name}]（参加順）。手番順はランダムに並べ替える
-function createGame(players, rng = Math.random) {
-  const setup = SETUP[players.length];
-  if (!setup) throw new Error('2〜5人で遊んでください');
+// opts.hitLimit: 1ターンに当てられる最大枚数（0 = 無制限）。4〜5人は公式どおり常に1
+function createGame(players, rng = Math.random, opts = {}) {
+  const base = SETUP[players.length];
+  if (!base) throw new Error('2〜5人で遊んでください');
+  const limit = HIT_LIMITS.includes(opts.hitLimit) ? opts.hitLimit : 0;
+  const setup = { ...base, maxHits: base.multi ? (limit || Infinity) : 1 };
   const deck = shuffle(makeDeck(), rng);
   const order = shuffle(players, rng);
   let k = 0;
@@ -47,6 +53,7 @@ function createGame(players, rng = Math.random) {
     down: take(setup.down),
     turn: 0, // players 配列内の手番プレイヤーの添字
     continuing: false, // 正解直後で続けて宣言できる状態か
+    hitsThisTurn: 0, // この手番で当てた枚数
     phase: 'playing',
     winner: null,
     log: [],
@@ -57,6 +64,7 @@ function createGame(players, rng = Math.random) {
 function nextTurn(state) {
   state.turn = (state.turn + 1) % state.players.length;
   state.continuing = false;
+  state.hitsThisTurn = 0;
 }
 
 // 数字の宣言。戻り値 {ok, error?, hit?}
@@ -77,10 +85,11 @@ function guess(state, playerId, n) {
       state.winner = p.id;
       return { ok: true, hit };
     }
-    if (state.setup.multi) {
-      state.continuing = true; // 2〜3人：もう一度宣言できる
+    state.hitsThisTurn++;
+    if (state.hitsThisTurn < state.setup.maxHits) {
+      state.continuing = true; // 上限に達していなければもう一度宣言できる
     } else {
-      nextTurn(state);
+      nextTurn(state); // 上限に達したら交代
     }
   } else {
     nextTurn(state);
@@ -106,6 +115,8 @@ function viewFor(state, playerId) {
     phase: state.phase,
     me: playerId,
     multi: state.setup.multi,
+    maxHits: Number.isFinite(state.setup.maxHits) ? state.setup.maxHits : null, // null = 無制限
+    hitsThisTurn: state.hitsThisTurn,
     turnId: state.players[state.turn].id,
     continuing: state.continuing,
     winner: state.winner,
@@ -128,4 +139,4 @@ function viewFor(state, playerId) {
   };
 }
 
-module.exports = { SETUP, makeDeck, createGame, guess, pass, viewFor };
+module.exports = { SETUP, HIT_LIMITS, makeDeck, createGame, guess, pass, viewFor };

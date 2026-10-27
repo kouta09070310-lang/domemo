@@ -82,6 +82,7 @@ $('joinForm').addEventListener('submit', (e) => {
   socket.emit('join', $('nameInput').value);
 });
 $('startBtn').onclick = () => socket.emit('start');
+for (const b of $('limitPicker').children) b.onclick = () => socket.emit('setHitLimit', Number(b.dataset.v));
 $('leaveBtn').onclick = () => socket.emit('leave');
 $('passBtn').onclick = () => socket.emit('pass');
 $('lobbyBtn').onclick = () => socket.emit('toLobby');
@@ -147,6 +148,11 @@ function render() {
       }
       return li;
     }));
+    const lim = latest.hitLimit;
+    for (const b of $('limitPicker').children) b.classList.toggle('on', Number(b.dataset.v) === lim);
+    $('limitHint').textContent = members.length >= 4
+      ? '4〜5人は公式ルールで1ターン1枚までです（この設定は2〜3人のときに効きます）'
+      : lim === 0 ? '公式ルール：当たる限り続けて宣言できます' : `当たっても ${lim} 枚当てたら次の人に交代`;
     const ok = members.length >= 2 && members.length <= 5;
     $('startBtn').disabled = !ok;
     $('startHint').textContent = ok ? '全員そろったら誰が押してもOK' : '2〜5人で開始できます';
@@ -163,7 +169,8 @@ function render() {
     banner.textContent = w.id === me ? '🎉 あなたの勝ち！' : `${w.name} さんの勝ち`;
     banner.classList.add('win');
   } else if (myTurn) {
-    banner.textContent = game.continuing ? '正解！続けて宣言できます' : 'あなたの番：自分にある数字を宣言';
+    const left = game.maxHits == null ? '' : `（あと${game.maxHits - game.hitsThisTurn}枚）`;
+    banner.textContent = game.continuing ? `正解！続けて宣言できます${left}` : 'あなたの番：自分にある数字を宣言';
     banner.classList.add('myturn');
   } else {
     banner.textContent = `${turnName} さんの番`;

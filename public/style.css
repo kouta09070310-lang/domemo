@@ -111,3 +111,9 @@ button.ghost { width: 100%; background: transparent; color: var(--muted); border
 #shareBtn { margin: 4px 0 12px; }
 #codeForm { margin-top: 24px; }
 #codeInput { text-transform: uppercase; letter-spacing: .15em; }
+
+/* 枚数設定の切り替えボタン */
+.seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.seg button { padding: 10px 0; background: transparent; color: var(--ink); border: 1px solid var(--line); }
+.seg button.on { background: var(--ink); color: var(--card); border-color: var(--ink); }
+#limitHint { margin: 8px 0 0; font-size: 13px; }
