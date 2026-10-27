@@ -1,0 +1,17 @@
+{
+  "name": "domemo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ドメモをLAN内のスマホ/PCで遊ぶ",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "express": "^4.21.0",
+    "qrcode": "^1.5.4",
+    "socket.io": "^4.8.0"
+  }
+}
