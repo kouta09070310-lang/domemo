@@ -83,6 +83,8 @@ $('joinForm').addEventListener('submit', (e) => {
 });
 $('startBtn').onclick = () => socket.emit('start');
 for (const b of $('limitPicker').children) b.onclick = () => socket.emit('setHitLimit', Number(b.dataset.v));
+for (const b of $('endPicker').children) b.onclick = () => socket.emit('setOption', { key: 'untilLast', value: b.dataset.v === 'last' });
+for (const b of $('logPicker').children) b.onclick = () => socket.emit('setOption', { key: 'logMode', value: b.dataset.v });
 $('leaveBtn').onclick = () => socket.emit('leave');
 $('passBtn').onclick = () => socket.emit('pass');
 $('lobbyBtn').onclick = () => socket.emit('toLobby');
@@ -153,6 +155,10 @@ function render() {
     $('limitHint').textContent = members.length >= 4
       ? '4〜5人は公式ルールで1ターン1枚までです（この設定は2〜3人のときに効きます）'
       : lim === 0 ? '公式ルール：当たる限り続けて宣言できます' : `当たっても ${lim} 枚当てたら次の人に交代`;
+    for (const b of $('endPicker').children) b.classList.toggle('on', (b.dataset.v === 'last') === latest.untilLast);
+    for (const b of $('logPicker').children) b.classList.toggle('on', b.dataset.v === latest.logMode);
+    $('logHint').textContent = (members.length === 2 ? '2人のときは終了条件はどちらでも同じです。' : '')
+      + (latest.logMode === 'last' ? 'それより前の宣言は自分で覚えておく必要があります（終了後は全部見られます）' : '');
     const ok = members.length >= 2 && members.length <= 5;
     $('startBtn').disabled = !ok;
     $('startHint').textContent = ok ? '全員そろったら誰が押してもOK' : '2〜5人で開始できます';
@@ -164,9 +170,15 @@ function render() {
   const turnName = game.players.find((p) => p.id === game.turnId)?.name;
   const banner = $('banner');
   banner.className = 'banner';
+  const meP = game.players.find((p) => p.id === me);
+  const n = game.players.length;
   if (game.phase === 'ended') {
     const w = game.players.find((p) => p.id === game.winner);
-    banner.textContent = w.id === me ? '🎉 あなたの勝ち！' : `${w.name} さんの勝ち`;
+    if (!game.untilLast || n === 2) banner.textContent = w.id === me ? '🎉 あなたの勝ち！' : `${w.name} さんの勝ち`;
+    else banner.textContent = meP.rank === 1 ? '🎉 あなたが1位！' : meP.rank === n ? `あなたは最下位…（${n}位）` : `あなたは ${meP.rank} 位`;
+    banner.classList.add('win');
+  } else if (meP.rank != null) {
+    banner.textContent = `🎉 ${meP.rank}位で上がり！ 最下位が決まるまで観戦中（${turnName} さんの番）`;
     banner.classList.add('win');
   } else if (myTurn) {
     const left = game.maxHits == null ? '' : `（あと${game.maxHits - game.hitsThisTurn}枚）`;
@@ -181,7 +193,7 @@ function render() {
   const others = game.players.slice(idx + 1).concat(game.players.slice(0, idx));
   $('others').replaceChildren(...others.map((p) => {
     const c = document.createElement('div');
-    c.className = 'card';
+    c.className = 'card' + (p.rank != null && game.phase === 'playing' ? ' player-out' : '');
     const h = document.createElement('div');
     h.className = 'player-name';
     if (p.id === game.turnId && game.phase === 'playing') {
@@ -192,6 +204,11 @@ function render() {
     const s = document.createElement('span');
     s.className = 'done'; s.textContent = `${done}/${p.tiles.length} 正解`;
     h.appendChild(s);
+    if (p.rank != null) {
+      const r = document.createElement('span');
+      r.className = 'rank-badge'; r.textContent = `${p.rank}位`;
+      h.appendChild(r);
+    }
     const row = document.createElement('div');
     row.className = 'tiles';
     fillTiles(row, p.tiles);
@@ -215,9 +232,44 @@ function render() {
   for (const b of $('numPad').children) b.disabled = !myTurn;
   $('passBtn').classList.toggle('hidden', !(myTurn && game.continuing));
 
-  $('logList').replaceChildren(...game.log.slice().reverse().map((e) => {
+  // 順位表（誰かが上がったら表示）
+  $('ranking').classList.toggle('hidden', game.ranking.length === 0);
+  $('rankList').replaceChildren(...game.ranking.map((id, i) => {
+    const p = game.players.find((x) => x.id === id);
     const li = document.createElement('li');
-    if (e.pass) {
+    const pos = document.createElement('span');
+    pos.className = 'pos';
+    pos.textContent = `${i + 1}位`;
+    const nm = document.createElement('span');
+    nm.textContent = p.name + (p.id === me ? '（あなた）' : '');
+    if (p.id === me) nm.className = 'me';
+    li.append(pos, nm);
+    return li;
+  }));
+
+  const logEntries = game.log.slice().reverse();
+  const items = [];
+  let lastTurn = null;
+  for (const e of logEntries) {
+    // 手番の区切り（直前の手番だけモードのとき、どこまでが今の手番か分かるように）
+    if (lastTurn !== null && e.turn !== lastTurn) {
+      const sep = document.createElement('li');
+      sep.className = 'turn-sep'; sep.textContent = '―';
+      items.push(sep);
+    }
+    lastTurn = e.turn;
+    items.push(logItem(e));
+  }
+  $('logList').replaceChildren(...items);
+  $('logSummary').textContent = game.logMode === 'last' && game.phase === 'playing' ? '宣言ログ（直前の1手番まで）' : '宣言ログ';
+}
+
+function logItem(e) {
+    const li = document.createElement('li');
+    if (e.finish) {
+      li.className = 'finish';
+      li.textContent = `${e.name}：全部当てて ${e.finish}位で上がり！`;
+    } else if (e.pass) {
       li.textContent = `${e.name}：手番を終えた`;
     } else {
       li.textContent = `${e.name}：「${e.n}」 `;
@@ -227,5 +279,4 @@ function render() {
       li.appendChild(r);
     }
     return li;
-  }));
 }

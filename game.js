@@ -30,13 +30,23 @@ function shuffle(arr, rng) {
 // 1ターンに当てられる枚数の設定値（0 = 無制限＝公式ルール）
 const HIT_LIMITS = [0, 1, 2, 3];
 
+// 宣言ログの見せ方：all = 全部 / last = 直前の手番と今の手番だけ
+const LOG_MODES = ['all', 'last'];
+
 // ゲーム開始。players: [{id, name}]（参加順）。手番順はランダムに並べ替える
 // opts.hitLimit: 1ターンに当てられる最大枚数（0 = 無制限）。4〜5人は公式どおり常に1
+// opts.untilLast: true = 最下位が決まるまで続ける / false = 1位が出たら終了
+// opts.logMode: 宣言ログの見せ方（LOG_MODES）
 function createGame(players, rng = Math.random, opts = {}) {
   const base = SETUP[players.length];
   if (!base) throw new Error('2〜5人で遊んでください');
   const limit = HIT_LIMITS.includes(opts.hitLimit) ? opts.hitLimit : 0;
-  const setup = { ...base, maxHits: base.multi ? (limit || Infinity) : 1 };
+  const setup = {
+    ...base,
+    maxHits: base.multi ? (limit || Infinity) : 1,
+    untilLast: opts.untilLast !== false,
+    logMode: LOG_MODES.includes(opts.logMode) ? opts.logMode : 'all',
+  };
   const deck = shuffle(makeDeck(), rng);
   const order = shuffle(players, rng);
   let k = 0;
@@ -48,23 +58,37 @@ function createGame(players, rng = Math.random, opts = {}) {
       id: p.id,
       name: p.name,
       tiles: take(setup.hand).map((n) => ({ n, revealed: false })),
+      rank: null, // 上がった順位（まだなら null）
     })),
     up: take(setup.up),
     down: take(setup.down),
     turn: 0, // players 配列内の手番プレイヤーの添字
     continuing: false, // 正解直後で続けて宣言できる状態か
     hitsThisTurn: 0, // この手番で当てた枚数
+    turnNo: 1, // 通し番号の手番（ログの「直前の手番」判定に使う）
     phase: 'playing',
-    winner: null,
+    winner: null, // 1位の id
+    ranking: [], // 上がった順の id（最下位も最後に入る）
     log: [],
   };
   return state;
 }
 
+// 次の「まだ上がっていない人」に手番を回す
 function nextTurn(state) {
-  state.turn = (state.turn + 1) % state.players.length;
+  const n = state.players.length;
+  for (let i = 1; i <= n; i++) {
+    const t = (state.turn + i) % n;
+    if (state.players[t].rank == null) { state.turn = t; break; }
+  }
   state.continuing = false;
   state.hitsThisTurn = 0;
+  state.turnNo++;
+}
+
+function finishGame(state) {
+  state.phase = 'ended';
+  state.winner = state.ranking[0] || null;
 }
 
 // 数字の宣言。戻り値 {ok, error?, hit?}
@@ -76,14 +100,24 @@ function guess(state, playerId, n) {
 
   const tile = p.tiles.find((t) => !t.revealed && t.n === n);
   const hit = !!tile;
-  state.log.push({ name: p.name, n, hit });
+  state.log.push({ turn: state.turnNo, name: p.name, n, hit });
 
   if (hit) {
     tile.revealed = true; // 同じ数字が複数あっても表にするのは1枚だけ
     if (p.tiles.every((t) => t.revealed)) {
-      state.phase = 'ended';
-      state.winner = p.id;
-      return { ok: true, hit };
+      // 上がり：順位を付けて抜ける
+      p.rank = state.ranking.length + 1;
+      state.ranking.push(p.id);
+      state.log.push({ turn: state.turnNo, name: p.name, finish: p.rank });
+      const left = state.players.filter((x) => x.rank == null);
+      if (!state.setup.untilLast || left.length <= 1) {
+        // 残り1人ならその人が最下位
+        for (const x of left) { x.rank = state.ranking.length + 1; state.ranking.push(x.id); }
+        finishGame(state);
+        return { ok: true, hit, finished: p.rank };
+      }
+      nextTurn(state);
+      return { ok: true, hit, finished: p.rank };
     }
     state.hitsThisTurn++;
     if (state.hitsThisTurn < state.setup.maxHits) {
@@ -102,9 +136,16 @@ function pass(state, playerId) {
   if (state.phase !== 'playing') return { ok: false, error: 'ゲームは終了しています' };
   if (state.players[state.turn].id !== playerId) return { ok: false, error: 'あなたの番ではありません' };
   if (!state.continuing) return { ok: false, error: '今は手番を終えられません' };
-  state.log.push({ name: state.players[state.turn].name, pass: true });
+  state.log.push({ turn: state.turnNo, name: state.players[state.turn].name, pass: true });
   nextTurn(state);
   return { ok: true };
+}
+
+// ログの見せ方に応じて絞り込む。last のときは「直前の手番」と「今の手番」の分だけ
+// （画面で隠すのではなく、送るデータ自体から消すので覗いても見えない）
+function visibleLog(state) {
+  if (state.phase === 'ended' || state.setup.logMode === 'all') return state.log.slice(-60);
+  return state.log.filter((e) => e.turn >= state.turnNo - 1);
 }
 
 // プレイヤー別に「見てよい情報だけ」を作る（サーバー権威型の要）
@@ -120,6 +161,10 @@ function viewFor(state, playerId) {
     turnId: state.players[state.turn].id,
     continuing: state.continuing,
     winner: state.winner,
+    untilLast: state.setup.untilLast,
+    logMode: state.setup.logMode,
+    turnNo: state.turnNo,
+    ranking: state.ranking.slice(),
     players: state.players.map((p) => {
       let tiles = p.tiles.map((t) => ({
         n: p.id === playerId && !t.revealed && !ended ? null : t.n,
@@ -131,12 +176,12 @@ function viewFor(state, playerId) {
         tiles = tiles.filter((t) => t.revealed).sort((a, b) => a.n - b.n)
           .concat(tiles.filter((t) => !t.revealed));
       }
-      return { id: p.id, name: p.name, tiles };
+      return { id: p.id, name: p.name, rank: p.rank, tiles };
     }),
     up: state.up.slice(),
     down: ended ? state.down.slice() : state.down.map(() => null),
-    log: state.log.slice(-30),
+    log: visibleLog(state),
   };
 }
 
-module.exports = { SETUP, HIT_LIMITS, makeDeck, createGame, guess, pass, viewFor };
+module.exports = { SETUP, HIT_LIMITS, LOG_MODES, makeDeck, createGame, guess, pass, viewFor };

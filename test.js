@@ -116,6 +116,50 @@ for (const k of [1, 2, 3]) {
   assert.strictEqual(g.viewFor(u, u.players[0].id).maxHits, null);
 }
 
+// 6d. 最下位まで：上がった人は抜けて手番が飛ばされ、残り1人で終了。順位は全員分つく
+for (const k of [3, 4, 5]) {
+  const s = g.createGame(mk(k), Math.random, { untilLast: true, hitLimit: 1 });
+  let guard = 0;
+  const seenTurnAfterFinish = [];
+  while (s.phase === 'playing' && guard++ < 500) {
+    const p = cur(s);
+    assert.strictEqual(p.rank, null, '上がった人に手番が回った');
+    seenTurnAfterFinish.push(p.id);
+    g.guess(s, p.id, hasN(p));
+  }
+  assert.strictEqual(s.phase, 'ended');
+  assert.strictEqual(s.ranking.length, k);
+  assert.deepStrictEqual(s.players.map((p) => p.rank).sort(), Array.from({ length: k }, (_, i) => i + 1));
+  assert.strictEqual(s.winner, s.ranking[0]);
+  // 最下位は全部は当てていない（残り1人になった時点で終了）
+  const last = s.players.find((p) => p.rank === k);
+  assert(!last.tiles.every((t) => t.revealed));
+  assert(s.log.filter((e) => e.finish).length === k - 1);
+}
+
+// 6e. 1位で終了モード：最初に上がった人で終わる
+{
+  const s = g.createGame(mk(4), Math.random, { untilLast: false });
+  let guard = 0;
+  while (s.phase === 'playing' && guard++ < 500) g.guess(s, cur(s).id, hasN(cur(s)));
+  assert.strictEqual(s.phase, 'ended');
+  assert.strictEqual(s.players.filter((p) => p.tiles.every((t) => t.revealed)).length, 1);
+}
+
+// 6f. ログ「直前の1手番だけ」：前の手番と今の手番の分しか送らない。終了後は全部
+{
+  const s = g.createGame(mk(3), Math.random, { logMode: 'last', hitLimit: 1 });
+  for (let i = 0; i < 6; i++) { const p = cur(s); const m = missN(p); g.guess(s, p.id, m || hasN(p)); }
+  const v = g.viewFor(s, s.players[0].id);
+  assert(v.log.length > 0 && v.log.every((e) => e.turn >= s.turnNo - 1));
+  assert(s.log.length > v.log.length);
+  const all = g.viewFor(g.createGame(mk(3), Math.random, { logMode: 'all' }), 'p0');
+  assert.strictEqual(all.logMode, 'all');
+  let guard = 0;
+  while (s.phase === 'playing' && guard++ < 500) g.guess(s, cur(s).id, hasN(cur(s)));
+  assert.strictEqual(g.viewFor(s, 'p0').log.length, Math.min(60, s.log.length));
+}
+
 // 7. 全員が常に正解し続ければ最後に勝者が出て、終了後は伏せも公開される
 for (const k of [2, 3, 4, 5]) {
   const s = g.createGame(mk(k));

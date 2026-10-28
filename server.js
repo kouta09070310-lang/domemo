@@ -51,7 +51,8 @@ function getOrCreateRoom(code) {
   let r = rooms.get(code);
   if (!r) {
     if (rooms.size >= MAX_ROOMS) return null;
-    r = { code, members: [], state: null, emptyTimer: null, hitLimit: 0 }; // hitLimit 0 = 無制限（公式）
+    // 部屋の設定：hitLimit 0 = 無制限（公式）/ untilLast true = 最下位まで / logMode 'all' = ログ全部
+    r = { code, members: [], state: null, emptyTimer: null, hitLimit: 0, untilLast: true, logMode: 'all' };
     rooms.set(code, r);
   }
   return r;
@@ -77,6 +78,8 @@ function broadcast(r) {
     io.to(m.socketId).emit('update', {
       room: r.code,
       hitLimit: r.hitLimit,
+      untilLast: r.untilLast,
+      logMode: r.logMode,
       me: idOf(m),
       members,
       game: r.state ? game.viewFor(r.state, idOf(m)) : null,
@@ -129,7 +132,9 @@ io.on('connection', (socket) => {
     if (!r || !member || playing(r)) return;
     const n = r.members.length;
     if (n < 2 || n > 5) return socket.emit('errorMsg', '2〜5人で開始できます');
-    r.state = game.createGame(r.members.map((m) => ({ id: idOf(m), name: m.name })), Math.random, { hitLimit: r.hitLimit });
+    r.state = game.createGame(r.members.map((m) => ({ id: idOf(m), name: m.name })), Math.random, {
+      hitLimit: r.hitLimit, untilLast: r.untilLast, logMode: r.logMode,
+    });
     broadcast(r);
   });
 
@@ -140,6 +145,16 @@ io.on('connection', (socket) => {
     v = Number(v);
     if (!game.HIT_LIMITS.includes(v)) return;
     r.hitLimit = v;
+    broadcast(r);
+  });
+
+  // 終了条件とログ表示の設定（ロビーでのみ変更可、全員に反映）
+  socket.on('setOption', ({ key, value } = {}) => {
+    const r = room;
+    if (!r || !member || r.state) return;
+    if (key === 'untilLast' && typeof value === 'boolean') r.untilLast = value;
+    else if (key === 'logMode' && game.LOG_MODES.includes(value)) r.logMode = value;
+    else return;
     broadcast(r);
   });
 

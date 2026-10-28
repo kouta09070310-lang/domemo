@@ -117,3 +117,19 @@ button.ghost { width: 100%; background: transparent; color: var(--muted); border
 .seg button { padding: 10px 0; background: transparent; color: var(--ink); border: 1px solid var(--line); }
 .seg button.on { background: var(--ink); color: var(--card); border-color: var(--ink); }
 #limitHint { margin: 8px 0 0; font-size: 13px; }
+
+.seg.seg2 { grid-template-columns: repeat(2, 1fr); }
+.seg.seg2 button { font-size: 14px; }
+h2.mt { margin-top: 14px; }
+#logHint { margin: 8px 0 0; font-size: 13px; }
+.rank-badge { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--n5); color: #2a2620; }
+.player-out { opacity: .6; }
+#rankList { margin: 0; padding-left: 0; list-style: none; }
+#rankList li { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 16px; }
+#rankList li:last-child { border-bottom: 0; }
+#rankList .pos { width: 48px; font-weight: 800; }
+#rankList .me { font-weight: 700; }
+.log .turn-sep { list-style: none; margin-left: -22px; color: var(--muted); font-size: 12px; }
+.finish { color: var(--n6); font-weight: 700; }
+#logList { list-style: none; padding-left: 0; }
+.log .turn-sep { margin-left: 0; line-height: 1; }

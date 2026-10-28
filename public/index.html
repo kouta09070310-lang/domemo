@@ -49,6 +49,17 @@
       </div>
       <p id="limitHint" class="hint"></p>
     </div>
+    <div class="card">
+      <h2>終了条件</h2>
+      <div id="endPicker" class="seg seg2">
+        <button data-v="last">最下位が決まるまで</button><button data-v="first">1位が出たら終了</button>
+      </div>
+      <h2 class="mt">宣言ログ</h2>
+      <div id="logPicker" class="seg seg2">
+        <button data-v="all">全部表示</button><button data-v="last">直前の1手番だけ</button>
+      </div>
+      <p id="logHint" class="hint"></p>
+    </div>
     <button id="startBtn" class="primary">ゲーム開始</button>
     <p id="startHint" class="hint"></p>
     <div class="card qr">
@@ -81,9 +92,13 @@
     <div id="endControls" class="hidden">
       <button id="lobbyBtn" class="primary">ロビーに戻る</button>
     </div>
+    <div id="ranking" class="card hidden">
+      <h2>順位</h2>
+      <ol id="rankList"></ol>
+    </div>
     <details class="card log" open>
-      <summary>宣言ログ</summary>
-      <ol id="logList" reversed></ol>
+      <summary id="logSummary">宣言ログ</summary>
+      <ul id="logList"></ul>
     </details>
   </section>
 
