@@ -226,3 +226,39 @@ body.my-turn .edge-glow { opacity: 1; animation: edgePulse 1.4s ease-in-out infi
 }
 /* 消音ボタンとバナーの文字が重ならないように */
 .banner { padding-left: 44px; padding-right: 44px; }
+
+/* ===== 上がり ===== */
+.cutin[data-variant="gold"] .cutin-band {
+  background: linear-gradient(90deg, #2a2620 0%, #b8860b 25%, #ffd65a 50%, #b8860b 75%, #2a2620 100%);
+  color: #2a2620;
+}
+.cutin[data-variant="gold"] .cutin-text { text-shadow: 0 2px 0 rgba(255,255,255,.5); }
+.cutin[data-variant="silver"] .cutin-band {
+  background: linear-gradient(90deg, #2a2620 0%, #6b7f99 30%, #c9d4e3 50%, #6b7f99 70%, #2a2620 100%);
+  color: #1d2430;
+}
+.cutin-text { font-size: 52px; }
+.cutin-name { font-size: 18px; }
+/* 上がった人のタイルが順にきらめく */
+.agari-flash .tile { animation: sparkle .5s ease-out both; }
+.agari-flash .tile:nth-child(2) { animation-delay: .08s; } .agari-flash .tile:nth-child(3) { animation-delay: .16s; }
+.agari-flash .tile:nth-child(4) { animation-delay: .24s; } .agari-flash .tile:nth-child(5) { animation-delay: .32s; }
+.agari-flash .tile:nth-child(6) { animation-delay: .40s; } .agari-flash .tile:nth-child(7) { animation-delay: .48s; }
+@keyframes sparkle {
+  0% { transform: scale(1); filter: brightness(1); }
+  40% { transform: scale(1.18) rotate(-4deg); filter: brightness(1.6); box-shadow: 0 0 0 4px #ffd65a, 0 0 18px 6px rgba(255, 214, 90, .8); }
+  100% { transform: scale(1); filter: brightness(1); }
+}
+.card.agari-flash { border-color: #d9a21b; box-shadow: 0 0 0 4px rgba(217, 162, 27, .25); }
+/* 紙吹雪 */
+.confetti { position: fixed; inset: 0; z-index: 35; pointer-events: none; overflow: hidden; }
+.confetti i {
+  position: absolute; top: -20px; width: 8px; height: 14px; border-radius: 2px;
+  animation-name: fall; animation-timing-function: cubic-bezier(.3, .6, .6, 1); animation-fill-mode: forwards;
+}
+@keyframes fall {
+  to { transform: translate(var(--drift), 110vh) rotate(var(--spin)); }
+}
+@media (prefers-reduced-motion: reduce) { .agari-flash .tile { animation: none; } }
+/* 帯（画面幅の140%）を画面の中央にそろえる */
+.cutin-band { margin-left: -20vw; }

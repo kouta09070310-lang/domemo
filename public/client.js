@@ -219,6 +219,7 @@ function render() {
     const row = document.createElement('div');
     row.className = 'tiles';
     fillTiles(row, p.tiles);
+    if ((agariFlash.get(p.id) || 0) > Date.now()) c.classList.add('agari-flash');
     c.append(h, row);
     return c;
   }));
@@ -232,6 +233,7 @@ function render() {
   fillTiles($('myTiles'), mine.tiles);
   const myRiichi = isRiichi(mine) && game.phase === 'playing';
   $('mine').classList.toggle('riichi', myRiichi);
+  $('mine').classList.toggle('agari-flash', (agariFlash.get(mine.id) || 0) > Date.now());
   $('mine').classList.toggle('is-turn', myTurn);
   $('myHead').replaceChildren(document.createTextNode('あなたのタイル'), ...(myRiichi ? [riichiBadge()] : []));
   document.body.classList.toggle('my-turn', myTurn);
@@ -315,18 +317,32 @@ function playEffects(game, me) {
     turnNo: game.turnNo,
     myTurn: game.phase === 'playing' && game.turnId === me,
     riichi: new Set(game.players.filter(isRiichi).map((p) => p.id)),
+    ranked: new Set(game.players.filter((p) => p.rank != null).map((p) => p.id)),
   };
   let prev = fxPrev;
-  if (prev === 'lobby') prev = { sig, myTurn: false, riichi: new Set() };
+  if (prev === 'lobby') prev = { sig, myTurn: false, riichi: new Set(), ranked: new Set() };
   fxPrev = cur;
-  if (!prev || prev.sig !== sig || game.phase !== 'playing') return;
+  if (!prev || prev.sig !== sig) return;
+
+  // 上がった人（全部当てた人。最下位は当て切っていないので除く）
+  const finishers = game.players.filter((p) => cur.ranked.has(p.id) && !prev.ranked.has(p.id)
+    && p.tiles.every((t) => t.revealed));
+  if (finishers.length) {
+    const p = finishers[0];
+    agari(p, me, game);
+    if (game.phase === 'ended') setTimeout(() => finale(game, me), 1900);
+    else if (cur.myTurn && !prev.myTurn) setTimeout(turnPop, 1900);
+    return;
+  }
+  if (game.phase !== 'playing') return;
 
   // 新しくリーチになった人
   const newRiichi = game.players.filter((p) => cur.riichi.has(p.id) && !prev.riichi.has(p.id));
   if (newRiichi.length) {
     const p = newRiichi[0];
-    cutIn(p.id === me ? 'あなた' : p.name);
+    cutIn(p.id === me ? 'あなた' : p.name, 'リーチ！', 'riichi');
     sfx.riichi();
+    voice.play('riichi');
     buzz([60, 40, 120]);
     // リーチ演出の後に自分の番の表示を出す
     if (cur.myTurn && !prev.myTurn) setTimeout(turnPop, 1500);
@@ -344,9 +360,48 @@ function turnPop() {
   buzz(120);
 }
 
-function cutIn(name) {
+// 上がり：金色のカットイン＋紙吹雪＋その人のタイルがきらめく
+const agariFlash = new Map(); // id → 光らせ終わる時刻
+function agari(p, me, game) {
+  const who = p.id === me ? 'あなた' : p.name;
+  cutIn(`${who} ・ ${p.rank}位`, '上がり！', p.rank === 1 ? 'gold' : 'silver');
+  sfx.agari(p.rank === 1);
+  buzz(p.rank === 1 ? [80, 50, 80, 50, 200] : [80, 50, 120]);
+  confetti(p.rank === 1 ? 90 : 35);
+  agariFlash.set(p.id, Date.now() + 2600);
+  setTimeout(render, 2700); // きらめき終了後に通常表示へ戻す
+  render();
+}
+
+// 最下位が決まった（または1位で終了）ときの順位発表
+function finale(game, me) {
+  sfx.finale();
+  const meP = game.players.find((p) => p.id === me);
+  if (meP && meP.rank === 1) confetti(60);
+}
+
+function confetti(count) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const colors = ['#8e6bbf', '#3f86c7', '#2e9e8f', '#6aa538', '#d9a21b', '#e0742a', '#cc3d4f'];
+  const layer = $('confetti');
+  for (let i = 0; i < count; i++) {
+    const d = document.createElement('i');
+    d.style.left = Math.random() * 100 + 'vw';
+    d.style.background = colors[i % colors.length];
+    d.style.animationDuration = 1.8 + Math.random() * 1.6 + 's';
+    d.style.animationDelay = Math.random() * 0.5 + 's';
+    d.style.setProperty('--drift', (Math.random() * 160 - 80) + 'px');
+    d.style.setProperty('--spin', (Math.random() * 1080 - 540) + 'deg');
+    layer.appendChild(d);
+    setTimeout(() => d.remove(), 4200);
+  }
+}
+
+function cutIn(name, text, variant) {
   $('cutinName').textContent = `${name}`;
+  $('cutinText').textContent = text;
   const el = $('cutin');
+  el.dataset.variant = variant;
   el.classList.remove('show');
   void el.offsetWidth;
   el.classList.add('show');
@@ -390,6 +445,20 @@ function tone(freq, start, dur, { type = 'sine', vol = 0.18, to = null } = {}) {
   o.stop(t0 + dur + 0.02);
 }
 const sfx = {
+  // 上がり：明るいアルペジオ（1位はもう一段上まで）
+  agari(first) {
+    if (muted) return;
+    const notes = first ? [523, 659, 784, 1047, 1319, 1568] : [523, 659, 784, 1047];
+    notes.forEach((f, i) => tone(f, i * 0.09, 0.35, { type: 'triangle', vol: 0.16 }));
+    tone(first ? 2093 : 1568, notes.length * 0.09, 0.6, { type: 'sine', vol: 0.1 });
+  },
+  // 順位発表：短いファンファーレ
+  finale() {
+    if (muted) return;
+    [[523, 0], [523, 0.12], [523, 0.24], [659, 0.4], [784, 0.62]].forEach(([f, t]) =>
+      tone(f, t, 0.18, { type: 'square', vol: 0.06 }));
+    [523, 659, 784, 1047].forEach((f) => tone(f, 0.86, 1.0, { type: 'triangle', vol: 0.09 }));
+  },
   // 自分の番：明るい2音「ピコン」
   turn() {
     if (muted) return;
@@ -418,3 +487,32 @@ $('muteBtn').onclick = () => {
   if (!muted) sfx.turn(); // 音量確認を兼ねて1回鳴らす
 };
 renderMute();
+
+// ===== 声（public/voice/*.mp3 があれば再生。無ければ何もしない） =====
+const voice = {
+  buffers: {},
+  loading: {},
+  load(name) {
+    const a = audio();
+    if (!a || this.buffers[name] || this.loading[name]) return;
+    this.loading[name] = fetch(`voice/${name}.mp3`)
+      .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject()))
+      .then((b) => new Promise((ok, ng) => a.decodeAudioData(b, ok, ng)))
+      .then((buf) => { this.buffers[name] = buf; })
+      .catch(() => { this.buffers[name] = null; });
+  },
+  play(name) {
+    if (muted) return;
+    const a = audio();
+    const buf = this.buffers[name];
+    if (!a || !buf) return;
+    const src = a.createBufferSource();
+    const g = a.createGain();
+    g.gain.value = 0.9;
+    src.buffer = buf;
+    src.connect(g).connect(a.destination);
+    src.start(a.currentTime + 0.15); // 「ドン」の直後に声
+  },
+};
+// 最初のタップで音を有効にするついでに、声を読み込んでおく
+window.addEventListener('pointerdown', () => voice.load('riichi'), { once: true });
