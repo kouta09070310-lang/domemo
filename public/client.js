@@ -136,6 +136,8 @@ function render() {
   const { me, members, game } = latest;
 
   if (!game) {
+    document.body.classList.remove('my-turn');
+    fxPrev = 'lobby'; // ロビーから開始した最初の手番は演出する
     show('lobby');
     $('lobbyRoom').textContent = latest.room;
     loadQr();
@@ -193,7 +195,10 @@ function render() {
   const others = game.players.slice(idx + 1).concat(game.players.slice(0, idx));
   $('others').replaceChildren(...others.map((p) => {
     const c = document.createElement('div');
-    c.className = 'card' + (p.rank != null && game.phase === 'playing' ? ' player-out' : '');
+    const playingNow = game.phase === 'playing';
+    c.className = 'card' + (p.rank != null && playingNow ? ' player-out' : '')
+      + (p.id === game.turnId && playingNow ? ' is-turn' : '')
+      + (isRiichi(p) && playingNow ? ' riichi' : '');
     const h = document.createElement('div');
     h.className = 'player-name';
     if (p.id === game.turnId && game.phase === 'playing') {
@@ -208,6 +213,8 @@ function render() {
       const r = document.createElement('span');
       r.className = 'rank-badge'; r.textContent = `${p.rank}位`;
       h.appendChild(r);
+    } else if (isRiichi(p) && game.phase === 'playing') {
+      h.appendChild(riichiBadge());
     }
     const row = document.createElement('div');
     row.className = 'tiles';
@@ -223,6 +230,12 @@ function render() {
 
   const mine = game.players[idx];
   fillTiles($('myTiles'), mine.tiles);
+  const myRiichi = isRiichi(mine) && game.phase === 'playing';
+  $('mine').classList.toggle('riichi', myRiichi);
+  $('mine').classList.toggle('is-turn', myTurn);
+  $('myHead').replaceChildren(document.createTextNode('あなたのタイル'), ...(myRiichi ? [riichiBadge()] : []));
+  document.body.classList.toggle('my-turn', myTurn);
+  playEffects(game, me);
 
   // 操作欄
   const playing = game.phase === 'playing';
@@ -280,3 +293,128 @@ function logItem(e) {
     }
     return li;
 }
+
+// ===== 演出：自分の番・リーチ =====
+// リーチ＝未公開タイルが残り1枚（あと1回当てれば上がり）。何枚当てたかは全員に見えているので新しい情報は漏れない
+function isRiichi(p) {
+  return p.rank == null && p.tiles.filter((t) => !t.revealed).length === 1;
+}
+function riichiBadge() {
+  const b = document.createElement('span');
+  b.className = 'riichi-badge';
+  b.textContent = 'リーチ';
+  return b;
+}
+
+// 前回の状態と比べて「変わった瞬間」だけ演出する（再接続・再読み込みでは鳴らさない）
+let fxPrev = null;
+function playEffects(game, me) {
+  const sig = game.players.map((p) => p.id).join(',');
+  const cur = {
+    sig,
+    turnNo: game.turnNo,
+    myTurn: game.phase === 'playing' && game.turnId === me,
+    riichi: new Set(game.players.filter(isRiichi).map((p) => p.id)),
+  };
+  let prev = fxPrev;
+  if (prev === 'lobby') prev = { sig, myTurn: false, riichi: new Set() };
+  fxPrev = cur;
+  if (!prev || prev.sig !== sig || game.phase !== 'playing') return;
+
+  // 新しくリーチになった人
+  const newRiichi = game.players.filter((p) => cur.riichi.has(p.id) && !prev.riichi.has(p.id));
+  if (newRiichi.length) {
+    const p = newRiichi[0];
+    cutIn(p.id === me ? 'あなた' : p.name);
+    sfx.riichi();
+    buzz([60, 40, 120]);
+    // リーチ演出の後に自分の番の表示を出す
+    if (cur.myTurn && !prev.myTurn) setTimeout(turnPop, 1500);
+    return;
+  }
+  if (cur.myTurn && !prev.myTurn) turnPop();
+}
+
+function turnPop() {
+  const el = $('turnPop');
+  el.classList.remove('show');
+  void el.offsetWidth; // アニメーションを最初から再生
+  el.classList.add('show');
+  sfx.turn();
+  buzz(120);
+}
+
+function cutIn(name) {
+  $('cutinName').textContent = `${name}`;
+  const el = $('cutin');
+  el.classList.remove('show');
+  void el.offsetWidth;
+  el.classList.add('show');
+}
+
+function buzz(pattern) {
+  try { if (navigator.vibrate) navigator.vibrate(pattern); } catch {}
+}
+
+// ===== 効果音（Web Audio でその場で合成。外部ファイルなし） =====
+const MUTE_KEY = 'domemo-muted';
+let muted = false;
+try { muted = localStorage.getItem(MUTE_KEY) === '1'; } catch {}
+let actx = null;
+function audio() {
+  if (!actx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    actx = new AC();
+  }
+  if (actx.state === 'suspended') actx.resume();
+  return actx;
+}
+// iPhone は一度タップしないと音が出せないので、最初のタップで音を有効にする
+window.addEventListener('pointerdown', () => { if (!muted) audio(); }, { once: true });
+
+function tone(freq, start, dur, { type = 'sine', vol = 0.18, to = null } = {}) {
+  const a = audio();
+  if (!a) return;
+  const t0 = a.currentTime + start;
+  const o = a.createOscillator();
+  const g = a.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(freq, t0);
+  if (to) o.frequency.exponentialRampToValueAtTime(to, t0 + dur);
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(vol, t0 + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g).connect(a.destination);
+  o.start(t0);
+  o.stop(t0 + dur + 0.02);
+}
+const sfx = {
+  // 自分の番：明るい2音「ピコン」
+  turn() {
+    if (muted) return;
+    tone(988, 0, 0.12, { type: 'triangle' });
+    tone(1319, 0.1, 0.22, { type: 'triangle' });
+  },
+  // リーチ：低い「ドン」→ 駆け上がる和音
+  riichi() {
+    if (muted) return;
+    tone(110, 0, 0.35, { type: 'sine', vol: 0.4, to: 55 });
+    tone(523, 0.18, 0.5, { type: 'sawtooth', vol: 0.06 });
+    tone(659, 0.26, 0.5, { type: 'sawtooth', vol: 0.06 });
+    tone(784, 0.34, 0.6, { type: 'sawtooth', vol: 0.06 });
+    tone(1047, 0.42, 0.7, { type: 'triangle', vol: 0.12 });
+  },
+};
+
+function renderMute() {
+  $('muteBtn').textContent = muted ? '🔇' : '🔊';
+  $('muteBtn').setAttribute('aria-label', muted ? '音を出す' : '音を消す');
+}
+$('muteBtn').onclick = () => {
+  muted = !muted;
+  try { localStorage.setItem(MUTE_KEY, muted ? '1' : '0'); } catch {}
+  renderMute();
+  if (!muted) sfx.turn(); // 音量確認を兼ねて1回鳴らす
+};
+renderMute();
