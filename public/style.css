@@ -262,3 +262,9 @@ body.my-turn .edge-glow { opacity: 1; animation: edgePulse 1.4s ease-in-out infi
 @media (prefers-reduced-motion: reduce) { .agari-flash .tile { animation: none; } }
 /* 帯（画面幅の140%）を画面の中央にそろえる */
 .cutin-band { margin-left: -20vw; }
+
+/* BGMボタン：消音ボタンの左隣。オフのときは薄く */
+.bgm-btn { right: 52px; }
+.bgm-btn.off { opacity: .45; filter: grayscale(1); }
+.banner { text-align: left; padding: 12px 96px 12px 14px; min-height: 48px; }
+.credit { color: var(--muted); font-size: 12px; text-align: center; margin-top: 16px; }

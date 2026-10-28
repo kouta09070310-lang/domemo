@@ -341,6 +341,7 @@ function playEffects(game, me) {
   if (newRiichi.length) {
     const p = newRiichi[0];
     cutIn(p.id === me ? 'あなた' : p.name, 'リーチ！', 'riichi');
+    bgm.duck(1800);
     sfx.riichi();
     voice.play('riichi');
     buzz([60, 40, 120]);
@@ -365,6 +366,7 @@ const agariFlash = new Map(); // id → 光らせ終わる時刻
 function agari(p, me, game) {
   const who = p.id === me ? 'あなた' : p.name;
   cutIn(`${who} ・ ${p.rank}位`, '上がり！', p.rank === 1 ? 'gold' : 'silver');
+  bgm.duck(2200);
   sfx.agari(p.rank === 1);
   buzz(p.rank === 1 ? [80, 50, 80, 50, 200] : [80, 50, 120]);
   confetti(p.rank === 1 ? 90 : 35);
@@ -484,6 +486,7 @@ $('muteBtn').onclick = () => {
   muted = !muted;
   try { localStorage.setItem(MUTE_KEY, muted ? '1' : '0'); } catch {}
   renderMute();
+  bgm.sync();
   if (!muted) sfx.turn(); // 音量確認を兼ねて1回鳴らす
 };
 renderMute();
@@ -516,3 +519,54 @@ const voice = {
 };
 // 最初のタップで音を有効にするついでに、声を読み込んでおく
 window.addEventListener('pointerdown', () => voice.load('riichi'), { once: true });
+
+// ===== BGM（端末ごとにオン/オフ。初期状態はオフ：開いた瞬間に鳴ると困る場面があるため） =====
+const BGM_KEY = 'domemo-bgm';
+const bgm = {
+  el: null,
+  on: false,
+  base: 0.3, // ふだんの音量（効果音や声が聞こえる程度に控えめ）
+  init() {
+    try { this.on = localStorage.getItem(BGM_KEY) === '1'; } catch {}
+    this.render();
+  },
+  ensure() {
+    if (!this.el) {
+      this.el = new Audio('bgm/main.mp3');
+      this.el.loop = true;
+      this.el.preload = 'none';
+      this.el.volume = this.base;
+    }
+    return this.el;
+  },
+  // 🔊がオフ（全消音）のときや画面を閉じている間は止める
+  sync() {
+    const want = this.on && !muted && document.visibilityState === 'visible';
+    if (want) { const p = this.ensure().play(); if (p) p.catch(() => {}); }
+    else if (this.el) this.el.pause();
+    this.render();
+  },
+  toggle() {
+    this.on = !this.on;
+    try { localStorage.setItem(BGM_KEY, this.on ? '1' : '0'); } catch {}
+    this.sync();
+    if (this.on && muted) toast('🔇（全体の消音）がオンのため鳴りません');
+  },
+  // カットインや声の間だけ音量を下げる
+  duck(ms) {
+    if (!this.el || this.el.paused) return;
+    this.el.volume = this.base * 0.3;
+    clearTimeout(this.duckTimer);
+    this.duckTimer = setTimeout(() => { if (this.el) this.el.volume = this.base; }, ms);
+  },
+  render() {
+    const b = $('bgmBtn');
+    b.classList.toggle('off', !this.on);
+    b.setAttribute('aria-label', this.on ? 'BGMを止める' : 'BGMを流す');
+  },
+};
+$('bgmBtn').onclick = () => bgm.toggle();
+document.addEventListener('visibilitychange', () => bgm.sync());
+// iPhone は操作なしでは再生できないので、BGMオンの人は最初のタップで流し始める
+window.addEventListener('pointerdown', () => bgm.sync(), { once: true });
+bgm.init();
