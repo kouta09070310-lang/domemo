@@ -160,6 +160,27 @@ for (const k of [3, 4, 5]) {
   assert.strictEqual(g.viewFor(s, 'p0').log.length, Math.min(60, s.log.length));
 }
 
+// 6g. 持ち時間：締め切りを過ぎると「はずれ」扱いで交代。正解で続けるときは残り時間を引き継ぐ
+{
+  const t0 = 1_000_000;
+  const s = g.createGame(mk(2), Math.random, { turnSec: 15, now: t0 });
+  assert.strictEqual(s.deadline, t0 + 15000);
+  const p = cur(s);
+  assert.strictEqual(g.timeout(s, t0 + 14999), false); // まだ
+  g.guess(s, p.id, hasN(p), t0 + 5000); // 正解 → 続行、締め切りは据え置き
+  assert.strictEqual(cur(s).id, p.id);
+  assert.strictEqual(s.deadline, t0 + 15000);
+  assert(!g.guess(s, p.id, hasN(p), t0 + 15000).ok); // 締め切り後の宣言は無効
+  assert.strictEqual(g.timeout(s, t0 + 15000), true);
+  assert.notStrictEqual(cur(s).id, p.id);
+  assert(s.log[s.log.length - 1].timeout);
+  assert.strictEqual(s.deadline, t0 + 15000 + 15000); // 次の人は満タンから
+  // 持ち時間なしなら締め切りは無い
+  const u = g.createGame(mk(2));
+  assert.strictEqual(u.deadline, null);
+  assert.strictEqual(g.timeout(u, Date.now() + 1e9), false);
+}
+
 // 7. 全員が常に正解し続ければ最後に勝者が出て、終了後は伏せも公開される
 for (const k of [2, 3, 4, 5]) {
   const s = g.createGame(mk(k));

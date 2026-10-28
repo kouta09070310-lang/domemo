@@ -59,6 +59,11 @@
         <button data-v="all">全部表示</button><button data-v="last">直前の1手番だけ</button>
       </div>
       <p id="logHint" class="hint"></p>
+      <h2 class="mt">持ち時間（1手番）</h2>
+      <div id="timerPicker" class="seg">
+        <button data-v="0">なし</button><button data-v="15">15秒</button><button data-v="30">30秒</button><button data-v="60">60秒</button>
+      </div>
+      <p id="timerHint" class="hint"></p>
     </div>
     <button id="startBtn" class="primary">ゲーム開始</button>
     <p id="startHint" class="hint"></p>
@@ -74,7 +79,10 @@
 
   <!-- ゲーム -->
   <section id="game" class="screen hidden">
-    <div id="banner" class="banner"></div>
+    <div class="top-sticky">
+      <div id="banner" class="banner"></div>
+      <div id="timer" class="timer hidden"><i id="timerFill"></i><span id="timerText"></span></div>
+    </div>
     <div id="others"></div>
     <div class="card board">
       <div class="row-head">場の公開タイル</div>
@@ -116,6 +124,7 @@
   </div>
   <div class="edge-glow" aria-hidden="true"></div>
   <div id="confetti" class="confetti" aria-hidden="true"></div>
+  <div id="zawa" class="zawa" aria-hidden="true"></div>
 </main>
 <script src="/socket.io/socket.io.js"></script>
 <script src="client.js"></script>

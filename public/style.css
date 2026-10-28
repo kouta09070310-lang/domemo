@@ -268,3 +268,34 @@ body.my-turn .edge-glow { opacity: 1; animation: edgePulse 1.4s ease-in-out infi
 .bgm-btn.off { opacity: .45; filter: grayscale(1); }
 .banner { text-align: left; padding: 12px 96px 12px 14px; min-height: 48px; }
 .credit { color: var(--muted); font-size: 12px; text-align: center; margin-top: 16px; }
+
+/* ===== タイマー ===== */
+.top-sticky { position: sticky; top: 0; z-index: 5; }
+.top-sticky .banner { position: static; }
+.timer {
+  position: relative; height: 22px; margin-top: 6px; border-radius: 999px; overflow: hidden;
+  background: var(--card); border: 1px solid var(--line);
+}
+.timer i { position: absolute; inset: 0 auto 0 0; width: 100%; background: var(--n4); transition: width .2s linear, background .3s; }
+.timer.half i { background: var(--n5); }
+.timer.danger i { background: var(--n7); animation: timerBlink .5s steps(2) infinite; }
+@keyframes timerBlink { 50% { opacity: .55; } }
+.timer span { position: relative; display: block; text-align: center; font-size: 12px; font-weight: 700; line-height: 20px; color: var(--ink); }
+.log .timeout { color: var(--n7); }
+
+/* ===== ざわ…ざわ… ===== */
+.zawa { position: fixed; inset: 0; z-index: 32; pointer-events: none; overflow: hidden; }
+.zawa span {
+  position: absolute; font-weight: 900; font-style: italic; color: var(--ink); opacity: 0;
+  font-family: "Hiragino Mincho ProN", "Yu Mincho", serif; letter-spacing: -.05em;
+  text-shadow: 2px 2px 0 var(--bg), -2px -2px 0 var(--bg), 2px -2px 0 var(--bg), -2px 2px 0 var(--bg);
+  animation: zawaIn 4.8s ease-in-out forwards;
+}
+@keyframes zawaIn {
+  0% { opacity: 0; transform: translateY(8px) skewX(-8deg) scale(.9); }
+  12% { opacity: .9; transform: translateY(0) skewX(-8deg) scale(1); }
+  30% { transform: translateX(-3px) skewX(-8deg); }
+  50% { transform: translateX(3px) skewX(-8deg); }
+  70% { opacity: .9; transform: translateX(-2px) skewX(-8deg); }
+  100% { opacity: 0; transform: translateX(0) skewX(-8deg); }
+}

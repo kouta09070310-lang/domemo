@@ -33,10 +33,15 @@ const HIT_LIMITS = [0, 1, 2, 3];
 // 宣言ログの見せ方：all = 全部 / last = 直前の手番と今の手番だけ
 const LOG_MODES = ['all', 'last'];
 
+// 1手番の持ち時間（秒）。0 = なし
+const TURN_SECS = [0, 15, 30, 60];
+
 // ゲーム開始。players: [{id, name}]（参加順）。手番順はランダムに並べ替える
 // opts.hitLimit: 1ターンに当てられる最大枚数（0 = 無制限）。4〜5人は公式どおり常に1
 // opts.untilLast: true = 最下位が決まるまで続ける / false = 1位が出たら終了
 // opts.logMode: 宣言ログの見せ方（LOG_MODES）
+// opts.turnSec: 1手番の持ち時間（TURN_SECS）。正解して続けて宣言するときは残り時間を引き継ぐ
+// opts.now: 現在時刻（テスト用に差し替えられるように）
 function createGame(players, rng = Math.random, opts = {}) {
   const base = SETUP[players.length];
   if (!base) throw new Error('2〜5人で遊んでください');
@@ -46,6 +51,7 @@ function createGame(players, rng = Math.random, opts = {}) {
     maxHits: base.multi ? (limit || Infinity) : 1,
     untilLast: opts.untilLast !== false,
     logMode: LOG_MODES.includes(opts.logMode) ? opts.logMode : 'all',
+    turnSec: TURN_SECS.includes(opts.turnSec) ? opts.turnSec : 0,
   };
   const deck = shuffle(makeDeck(), rng);
   const order = shuffle(players, rng);
@@ -69,13 +75,19 @@ function createGame(players, rng = Math.random, opts = {}) {
     phase: 'playing',
     winner: null, // 1位の id
     ranking: [], // 上がった順の id（最下位も最後に入る）
+    deadline: null, // 今の手番の締め切り時刻（ms）。持ち時間なしなら null
     log: [],
   };
+  startClock(state, opts.now ?? Date.now());
   return state;
 }
 
+function startClock(state, now) {
+  state.deadline = state.setup.turnSec ? now + state.setup.turnSec * 1000 : null;
+}
+
 // 次の「まだ上がっていない人」に手番を回す
-function nextTurn(state) {
+function nextTurn(state, now = Date.now()) {
   const n = state.players.length;
   for (let i = 1; i <= n; i++) {
     const t = (state.turn + i) % n;
@@ -84,6 +96,16 @@ function nextTurn(state) {
   state.continuing = false;
   state.hitsThisTurn = 0;
   state.turnNo++;
+  startClock(state, now);
+}
+
+// 時間切れの処理：締め切りを過ぎていたら「はずれ」扱いで次の人へ。戻り値は処理したかどうか
+function timeout(state, now = Date.now()) {
+  if (state.phase !== 'playing' || state.deadline == null || now < state.deadline) return false;
+  const p = state.players[state.turn];
+  state.log.push({ turn: state.turnNo, name: p.name, timeout: true });
+  nextTurn(state, now);
+  return true;
 }
 
 function finishGame(state) {
@@ -92,8 +114,9 @@ function finishGame(state) {
 }
 
 // 数字の宣言。戻り値 {ok, error?, hit?}
-function guess(state, playerId, n) {
+function guess(state, playerId, n, now = Date.now()) {
   if (state.phase !== 'playing') return { ok: false, error: 'ゲームは終了しています' };
+  if (state.deadline != null && now >= state.deadline) return { ok: false, error: '時間切れです' };
   const p = state.players[state.turn];
   if (p.id !== playerId) return { ok: false, error: 'あなたの番ではありません' };
   if (!Number.isInteger(n) || n < 1 || n > 7) return { ok: false, error: '1〜7で宣言してください' };
@@ -116,28 +139,28 @@ function guess(state, playerId, n) {
         finishGame(state);
         return { ok: true, hit, finished: p.rank };
       }
-      nextTurn(state);
+      nextTurn(state, now);
       return { ok: true, hit, finished: p.rank };
     }
     state.hitsThisTurn++;
     if (state.hitsThisTurn < state.setup.maxHits) {
       state.continuing = true; // 上限に達していなければもう一度宣言できる
     } else {
-      nextTurn(state); // 上限に達したら交代
+      nextTurn(state, now); // 上限に達したら交代
     }
   } else {
-    nextTurn(state);
+    nextTurn(state, now);
   }
   return { ok: true, hit };
 }
 
 // 正解後の連続宣言をやめて手番を渡す（2〜3人のみ）
-function pass(state, playerId) {
+function pass(state, playerId, now = Date.now()) {
   if (state.phase !== 'playing') return { ok: false, error: 'ゲームは終了しています' };
   if (state.players[state.turn].id !== playerId) return { ok: false, error: 'あなたの番ではありません' };
   if (!state.continuing) return { ok: false, error: '今は手番を終えられません' };
   state.log.push({ turn: state.turnNo, name: state.players[state.turn].name, pass: true });
-  nextTurn(state);
+  nextTurn(state, now);
   return { ok: true };
 }
 
@@ -164,6 +187,9 @@ function viewFor(state, playerId) {
     untilLast: state.setup.untilLast,
     logMode: state.setup.logMode,
     turnNo: state.turnNo,
+    turnSec: state.setup.turnSec,
+    deadline: state.phase === 'playing' ? state.deadline : null,
+    serverNow: Date.now(), // 端末との時計のずれを補正するため
     ranking: state.ranking.slice(),
     players: state.players.map((p) => {
       let tiles = p.tiles.map((t) => ({
@@ -184,4 +210,4 @@ function viewFor(state, playerId) {
   };
 }
 
-module.exports = { SETUP, HIT_LIMITS, LOG_MODES, makeDeck, createGame, guess, pass, viewFor };
+module.exports = { SETUP, HIT_LIMITS, LOG_MODES, TURN_SECS, timeout, makeDeck, createGame, guess, pass, viewFor };

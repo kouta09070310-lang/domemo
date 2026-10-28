@@ -52,7 +52,8 @@ function getOrCreateRoom(code) {
   if (!r) {
     if (rooms.size >= MAX_ROOMS) return null;
     // 部屋の設定：hitLimit 0 = 無制限（公式）/ untilLast true = 最下位まで / logMode 'all' = ログ全部
-    r = { code, members: [], state: null, emptyTimer: null, hitLimit: 0, untilLast: true, logMode: 'all' };
+    // turnSec 0 = 持ち時間なし
+    r = { code, members: [], state: null, emptyTimer: null, hitLimit: 0, untilLast: true, logMode: 'all', turnSec: 0, turnTimer: null };
     rooms.set(code, r);
   }
   return r;
@@ -63,7 +64,7 @@ function scheduleCleanup(r) {
   clearTimeout(r.emptyTimer);
   if (r.members.some((m) => m.online)) return;
   r.emptyTimer = setTimeout(() => {
-    if (!r.members.some((m) => m.online)) rooms.delete(r.code);
+    if (!r.members.some((m) => m.online)) { clearTimeout(r.turnTimer); rooms.delete(r.code); }
   }, EMPTY_ROOM_MS);
 }
 
@@ -71,7 +72,19 @@ const idOf = (m) => m.token.slice(0, 8); // 公開用ID（トークン本体は�
 const playing = (r) => r.state && r.state.phase === 'playing';
 const inGame = (r, m) => r.state && r.state.players.some((p) => p.id === idOf(m));
 
+// 手番の締め切りに合わせてタイマーを張り直す。時間切れなら「はずれ」扱いで次の人へ
+function armTimer(r) {
+  clearTimeout(r.turnTimer);
+  const st = r.state;
+  if (!st || st.phase !== 'playing' || st.deadline == null) return;
+  r.turnTimer = setTimeout(() => {
+    if (r.state === st && game.timeout(st)) broadcast(r);
+    else armTimer(r);
+  }, Math.max(0, st.deadline - Date.now()) + 50);
+}
+
 function broadcast(r) {
+  armTimer(r);
   const members = r.members.map((m) => ({ id: idOf(m), name: m.name, online: m.online }));
   for (const m of r.members) {
     if (!m.socketId) continue;
@@ -80,6 +93,7 @@ function broadcast(r) {
       hitLimit: r.hitLimit,
       untilLast: r.untilLast,
       logMode: r.logMode,
+      turnSec: r.turnSec,
       me: idOf(m),
       members,
       game: r.state ? game.viewFor(r.state, idOf(m)) : null,
@@ -133,7 +147,7 @@ io.on('connection', (socket) => {
     const n = r.members.length;
     if (n < 2 || n > 5) return socket.emit('errorMsg', '2〜5人で開始できます');
     r.state = game.createGame(r.members.map((m) => ({ id: idOf(m), name: m.name })), Math.random, {
-      hitLimit: r.hitLimit, untilLast: r.untilLast, logMode: r.logMode,
+      hitLimit: r.hitLimit, untilLast: r.untilLast, logMode: r.logMode, turnSec: r.turnSec,
     });
     broadcast(r);
   });
@@ -154,6 +168,7 @@ io.on('connection', (socket) => {
     if (!r || !member || r.state) return;
     if (key === 'untilLast' && typeof value === 'boolean') r.untilLast = value;
     else if (key === 'logMode' && game.LOG_MODES.includes(value)) r.logMode = value;
+    else if (key === 'turnSec' && game.TURN_SECS.includes(value)) r.turnSec = value;
     else return;
     broadcast(r);
   });
@@ -179,6 +194,7 @@ io.on('connection', (socket) => {
     const r = room;
     if (!r || !member || !r.state || r.state.phase !== 'ended') return;
     r.state = null;
+    clearTimeout(r.turnTimer);
     r.members = r.members.filter((m) => m.online); // ゲーム中に切断していた人を外す
     broadcast(r);
   });

@@ -62,7 +62,13 @@ socket.on('badRoom', () => { toast('部屋コードは英数字4〜8文字です
 socket.on('joined', (d) => saveToken(d.room, d.token));
 socket.on('left', () => { saveToken(room, null); goHome(); });
 socket.on('errorMsg', toast);
-socket.on('update', (data) => { latest = data; render(); });
+socket.on('update', (data) => {
+  latest = data;
+  // サーバーと端末の時計のずれ（タイマー表示用）
+  if (data.game && data.game.serverNow) clockOffset = data.game.serverNow - Date.now();
+  render();
+});
+let clockOffset = 0;
 
 $('createBtn').onclick = () => {
   let code = '';
@@ -84,6 +90,7 @@ $('joinForm').addEventListener('submit', (e) => {
 $('startBtn').onclick = () => socket.emit('start');
 for (const b of $('limitPicker').children) b.onclick = () => socket.emit('setHitLimit', Number(b.dataset.v));
 for (const b of $('endPicker').children) b.onclick = () => socket.emit('setOption', { key: 'untilLast', value: b.dataset.v === 'last' });
+for (const b of $('timerPicker').children) b.onclick = () => socket.emit('setOption', { key: 'turnSec', value: Number(b.dataset.v) });
 for (const b of $('logPicker').children) b.onclick = () => socket.emit('setOption', { key: 'logMode', value: b.dataset.v });
 $('leaveBtn').onclick = () => socket.emit('leave');
 $('passBtn').onclick = () => socket.emit('pass');
@@ -161,6 +168,10 @@ function render() {
     for (const b of $('logPicker').children) b.classList.toggle('on', b.dataset.v === latest.logMode);
     $('logHint').textContent = (members.length === 2 ? '2人のときは終了条件はどちらでも同じです。' : '')
       + (latest.logMode === 'last' ? 'それより前の宣言は自分で覚えておく必要があります（終了後は全部見られます）' : '');
+    for (const b of $('timerPicker').children) b.classList.toggle('on', Number(b.dataset.v) === latest.turnSec);
+    $('timerHint').textContent = latest.turnSec
+      ? `${latest.turnSec}秒以内に宣言しないと「はずれ」扱いで交代。リーチの人の番で半分を切ると…ざわ…`
+      : '時間制限なし';
     const ok = members.length >= 2 && members.length <= 5;
     $('startBtn').disabled = !ok;
     $('startHint').textContent = ok ? '全員そろったら誰が押してもOK' : '2〜5人で開始できます';
@@ -281,7 +292,10 @@ function render() {
 
 function logItem(e) {
     const li = document.createElement('li');
-    if (e.finish) {
+    if (e.timeout) {
+      li.className = 'timeout';
+      li.textContent = `${e.name}：時間切れ（はずれ扱い）`;
+    } else if (e.finish) {
       li.className = 'finish';
       li.textContent = `${e.name}：全部当てて ${e.finish}位で上がり！`;
     } else if (e.pass) {
@@ -367,6 +381,7 @@ function agari(p, me, game) {
   const who = p.id === me ? 'あなた' : p.name;
   cutIn(`${who} ・ ${p.rank}位`, '上がり！', p.rank === 1 ? 'gold' : 'silver');
   bgm.duck(2200);
+  voice.play('agari', 0.25);
   sfx.agari(p.rank === 1);
   buzz(p.rank === 1 ? [80, 50, 80, 50, 200] : [80, 50, 120]);
   confetti(p.rank === 1 ? 90 : 35);
@@ -447,6 +462,11 @@ function tone(freq, start, dur, { type = 'sine', vol = 0.18, to = null } = {}) {
   o.stop(t0 + dur + 0.02);
 }
 const sfx = {
+  // 残り5秒のカチカチ（最後の1秒は高い音）
+  tick(sec) {
+    if (muted) return;
+    tone(sec === 1 ? 1760 : 1200, 0, 0.05, { type: 'square', vol: 0.05 });
+  },
   // 上がり：明るいアルペジオ（1位はもう一段上まで）
   agari(first) {
     if (muted) return;
@@ -504,7 +524,7 @@ const voice = {
       .then((buf) => { this.buffers[name] = buf; })
       .catch(() => { this.buffers[name] = null; });
   },
-  play(name) {
+  play(name, delay = 0.15) {
     if (muted) return;
     const a = audio();
     const buf = this.buffers[name];
@@ -514,11 +534,12 @@ const voice = {
     g.gain.value = 0.9;
     src.buffer = buf;
     src.connect(g).connect(a.destination);
-    src.start(a.currentTime + 0.15); // 「ドン」の直後に声
+    src.start(a.currentTime + delay); // 効果音の直後に声
   },
 };
 // 最初のタップで音を有効にするついでに、声を読み込んでおく
-window.addEventListener('pointerdown', () => voice.load('riichi'), { once: true });
+const VOICES = ['riichi', 'agari', 'zawa1', 'zawa2'];
+window.addEventListener('pointerdown', () => VOICES.forEach((v) => voice.load(v)), { once: true });
 
 // ===== BGM（端末ごとにオン/オフ。初期状態はオフ：開いた瞬間に鳴ると困る場面があるため） =====
 const BGM_KEY = 'domemo-bgm';
@@ -570,3 +591,59 @@ document.addEventListener('visibilitychange', () => bgm.sync());
 // iPhone は操作なしでは再生できないので、BGMオンの人は最初のタップで流し始める
 window.addEventListener('pointerdown', () => bgm.sync(), { once: true });
 bgm.init();
+
+// ===== タイマー表示・残り5秒のカチカチ・リーチ中に半分を切ったら「ざわ…ざわ…」 =====
+const tick = { turnNo: null, lastSec: null, zawaTurn: null, aboveHalf: false };
+setInterval(updateTimer, 200);
+function updateTimer() {
+  const g = latest && latest.game;
+  const el = $('timer');
+  if (!g || g.phase !== 'playing' || !g.turnSec || g.deadline == null) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  const total = g.turnSec * 1000;
+  const left = Math.max(0, g.deadline - (Date.now() + clockOffset));
+  const sec = Math.ceil(left / 1000);
+  $('timerFill').style.width = (left / total) * 100 + '%';
+  const turnP = g.players.find((p) => p.id === g.turnId);
+  const mine = g.turnId === latest.me;
+  $('timerText').textContent = `${mine ? 'あなた' : turnP.name}の残り ${sec}秒`;
+  el.classList.toggle('half', left <= total / 2 && sec > 5);
+  el.classList.toggle('danger', sec <= 5);
+
+  if (tick.turnNo !== g.turnNo) {
+    // 手番が変わった：この手番の開始時点で半分より上にいたかを覚える（再読み込み直後に鳴らさないため）
+    tick.turnNo = g.turnNo;
+    tick.lastSec = sec;
+    tick.aboveHalf = left > total / 2;
+    return;
+  }
+  // 残り5秒からは手番の人の端末だけカチカチ（同じ部屋に何台もあるとうるさいため）
+  if (mine && sec !== tick.lastSec && sec <= 5 && sec >= 1) sfx.tick(sec);
+  tick.lastSec = sec;
+
+  // リーチの人の番で残り半分を切った瞬間：全員の端末で「ざわ…ざわ…」
+  if (left > total / 2) tick.aboveHalf = true;
+  else if (tick.aboveHalf && tick.zawaTurn !== g.turnNo && isRiichi(turnP)) {
+    tick.zawaTurn = g.turnNo;
+    zawa();
+  }
+}
+
+function zawa() {
+  voice.play(Math.random() < 0.5 ? 'zawa1' : 'zawa2', 0);
+  bgm.duck(5200);
+  const layer = $('zawa');
+  layer.replaceChildren();
+  // 画面のあちこちに「ざわ…」を時間差で出す
+  const spots = [[6, 14], [58, 20], [16, 40], [62, 48], [8, 66], [52, 76], [30, 88]];
+  spots.forEach(([x, y], i) => {
+    const sp = document.createElement('span');
+    sp.textContent = 'ざわ…';
+    sp.style.left = x + (Math.random() * 8 - 4) + 'vw';
+    sp.style.top = y + (Math.random() * 4 - 2) + 'vh';
+    sp.style.fontSize = 30 + Math.random() * 22 + 'px';
+    sp.style.animationDelay = i * 0.35 + 's';
+    layer.appendChild(sp);
+  });
+  setTimeout(() => layer.replaceChildren(), 7500);
+}
