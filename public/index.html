@@ -114,6 +114,14 @@
   <div id="toast" class="toast hidden"></div>
   <button id="muteBtn" class="mute-btn" type="button">🔊</button>
   <button id="bgmBtn" class="mute-btn bgm-btn" type="button">🎵</button>
+  <div id="volPanel" class="vol-panel" hidden>
+    <label for="volSfx">効果音・声 <span id="volSfxVal"></span></label>
+    <input id="volSfx" type="range" min="0" max="100" step="5">
+    <label for="volBgm">BGM <span id="volBgmVal"></span></label>
+    <input id="volBgm" type="range" min="0" max="100" step="5">
+    <button id="volMute" type="button" class="vol-mute"></button>
+    <p>この端末だけの設定です。BGMのオン/オフは🎵</p>
+  </div>
   <!-- 演出用オーバーレイ -->
   <div id="turnPop" class="turn-pop" aria-hidden="true">あなたの番！</div>
   <div id="cutin" class="cutin" aria-hidden="true">

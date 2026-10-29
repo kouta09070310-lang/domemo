@@ -432,12 +432,20 @@ function buzz(pattern) {
 const MUTE_KEY = 'domemo-muted';
 let muted = false;
 try { muted = localStorage.getItem(MUTE_KEY) === '1'; } catch {}
+// 端末ごとの音量（0〜1）。LEVEL（作り手が決めたバランス）にこの値を掛ける
+const VOL_KEY = 'domemo-vol';
+const vol = { sfx: 1, bgm: 1 };
+try { Object.assign(vol, JSON.parse(localStorage.getItem(VOL_KEY) || '{}')); } catch {}
 let actx = null;
+let sfxBus = null; // 効果音と声はすべてここを通す（＝「効果音・声」スライダー）
 function audio() {
   if (!actx) {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return null;
     actx = new AC();
+    sfxBus = actx.createGain();
+    sfxBus.gain.value = vol.sfx;
+    sfxBus.connect(actx.destination);
   }
   if (actx.state === 'suspended') actx.resume();
   return actx;
@@ -467,7 +475,7 @@ function tone(freq, start, dur, { type = 'sine', vol = 0.18, to = null, level = 
   g.gain.setValueAtTime(0.0001, t0);
   g.gain.exponentialRampToValueAtTime(vol, t0 + 0.01);
   g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  o.connect(g).connect(a.destination);
+  o.connect(g).connect(sfxBus);
   o.start(t0);
   o.stop(t0 + dur + 0.02);
 }
@@ -512,13 +520,45 @@ function renderMute() {
   $('muteBtn').textContent = muted ? '🔇' : '🔊';
   $('muteBtn').setAttribute('aria-label', muted ? '音を出す' : '音を消す');
 }
-$('muteBtn').onclick = () => {
-  muted = !muted;
+function setMuted(m) {
+  muted = m;
   try { localStorage.setItem(MUTE_KEY, muted ? '1' : '0'); } catch {}
   renderMute();
   bgm.sync();
   if (!muted) sfx.turn(); // 音量確認を兼ねて1回鳴らす
+}
+function saveVol() { try { localStorage.setItem(VOL_KEY, JSON.stringify(vol)); } catch {} }
+
+// 音量パネル
+function renderVolPanel() {
+  $('volSfx').value = Math.round(vol.sfx * 100);
+  $('volBgm').value = Math.round(vol.bgm * 100);
+  $('volSfxVal').textContent = Math.round(vol.sfx * 100) + '%';
+  $('volBgmVal').textContent = Math.round(vol.bgm * 100) + '%';
+  $('volMute').textContent = muted ? '音を出す' : 'すべて消音';
+  $('volMute').classList.toggle('on', muted);
+}
+$('muteBtn').onclick = (e) => {
+  e.stopPropagation();
+  const p = $('volPanel');
+  p.hidden = !p.hidden;
+  if (!p.hidden) { audio(); renderVolPanel(); }
 };
+$('volPanel').addEventListener('click', (e) => e.stopPropagation());
+document.addEventListener('click', () => { $('volPanel').hidden = true; });
+$('volSfx').addEventListener('input', () => {
+  vol.sfx = $('volSfx').value / 100;
+  if (sfxBus) sfxBus.gain.setTargetAtTime(vol.sfx, sfxBus.context.currentTime, 0.05);
+  renderVolPanel();
+});
+$('volSfx').addEventListener('change', () => { saveVol(); sfx.turn(); }); // 指を離したら試し鳴らし
+$('volBgm').addEventListener('input', () => {
+  vol.bgm = $('volBgm').value / 100;
+  bgm.setLevel(LEVEL.bgm * vol.bgm);
+  renderVolPanel();
+});
+$('volBgm').addEventListener('change', saveVol);
+$('volMute').onclick = () => { setMuted(!muted); renderVolPanel(); };
 renderMute();
 
 // ===== 声（public/voice/*.mp3 があれば再生。無ければ何もしない） =====
@@ -543,7 +583,7 @@ const voice = {
     const g = a.createGain();
     g.gain.value = LEVEL.voice[name] ?? 0.6;
     src.buffer = buf;
-    src.connect(g).connect(a.destination);
+    src.connect(g).connect(sfxBus);
     src.start(a.currentTime + delay); // 効果音の直後に声
   },
 };
@@ -569,10 +609,10 @@ const bgm = {
       const a = audio();
       if (a && a.createMediaElementSource) {
         this.gain = a.createGain();
-        this.gain.gain.value = LEVEL.bgm;
+        this.gain.gain.value = LEVEL.bgm * vol.bgm;
         a.createMediaElementSource(this.el).connect(this.gain).connect(a.destination);
       } else {
-        this.el.volume = LEVEL.bgm; // Web Audio が使えない古い端末向け
+        this.el.volume = LEVEL.bgm * vol.bgm; // Web Audio が使えない古い端末向け
       }
     }
     return this.el;
@@ -593,9 +633,9 @@ const bgm = {
   // カットインや声の間だけ音量を下げる
   duck(ms) {
     if (!this.el || this.el.paused) return;
-    this.setLevel(LEVEL.bgm * LEVEL.bgmDuck);
+    this.setLevel(LEVEL.bgm * vol.bgm * LEVEL.bgmDuck);
     clearTimeout(this.duckTimer);
-    this.duckTimer = setTimeout(() => this.setLevel(LEVEL.bgm), ms);
+    this.duckTimer = setTimeout(() => this.setLevel(LEVEL.bgm * vol.bgm), ms);
   },
   setLevel(v) {
     if (this.gain) this.gain.gain.setTargetAtTime(v, this.gain.context.currentTime, 0.15); // なめらかに変える
