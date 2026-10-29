@@ -445,9 +445,19 @@ function audio() {
 // iPhone は一度タップしないと音が出せないので、最初のタップで音を有効にする
 window.addEventListener('pointerdown', () => { if (!muted) audio(); }, { once: true });
 
-function tone(freq, start, dur, { type = 'sine', vol = 0.18, to = null } = {}) {
+// ===== 音量の一覧（1.0 = 元の音量）。リーチを基準に、ほかは控えめに =====
+const LEVEL = {
+  sfx: 0.6, // 効果音（ピコン・カチカチ・上がり・ファンファーレ）
+  riichiSfx: 1.0, // リーチの「ドン」と和音（ちょうどいいとのことなので据え置き）
+  voice: { riichi: 0.9, agari: 0.6, zawa1: 0.22, zawa2: 0.22 },
+  bgm: 0.18, // BGM のふだんの音量
+  bgmDuck: 0.3, // カットイン中は BGM をさらにこの割合まで下げる
+};
+
+function tone(freq, start, dur, { type = 'sine', vol = 0.18, to = null, level = LEVEL.sfx } = {}) {
   const a = audio();
   if (!a) return;
+  vol *= level;
   const t0 = a.currentTime + start;
   const o = a.createOscillator();
   const g = a.createGain();
@@ -490,11 +500,11 @@ const sfx = {
   // リーチ：低い「ドン」→ 駆け上がる和音
   riichi() {
     if (muted) return;
-    tone(110, 0, 0.35, { type: 'sine', vol: 0.4, to: 55 });
-    tone(523, 0.18, 0.5, { type: 'sawtooth', vol: 0.06 });
-    tone(659, 0.26, 0.5, { type: 'sawtooth', vol: 0.06 });
-    tone(784, 0.34, 0.6, { type: 'sawtooth', vol: 0.06 });
-    tone(1047, 0.42, 0.7, { type: 'triangle', vol: 0.12 });
+    tone(110, 0, 0.35, { type: 'sine', vol: 0.4, to: 55, level: LEVEL.riichiSfx });
+    tone(523, 0.18, 0.5, { type: 'sawtooth', vol: 0.06, level: LEVEL.riichiSfx });
+    tone(659, 0.26, 0.5, { type: 'sawtooth', vol: 0.06, level: LEVEL.riichiSfx });
+    tone(784, 0.34, 0.6, { type: 'sawtooth', vol: 0.06, level: LEVEL.riichiSfx });
+    tone(1047, 0.42, 0.7, { type: 'triangle', vol: 0.12, level: LEVEL.riichiSfx });
   },
 };
 
@@ -531,7 +541,7 @@ const voice = {
     if (!a || !buf) return;
     const src = a.createBufferSource();
     const g = a.createGain();
-    g.gain.value = 0.9;
+    g.gain.value = LEVEL.voice[name] ?? 0.6;
     src.buffer = buf;
     src.connect(g).connect(a.destination);
     src.start(a.currentTime + delay); // 効果音の直後に声
@@ -546,7 +556,7 @@ const BGM_KEY = 'domemo-bgm';
 const bgm = {
   el: null,
   on: false,
-  base: 0.3, // ふだんの音量（効果音や声が聞こえる程度に控えめ）
+  gain: null, // 音量つまみ。iPhone は <audio> の volume を無視するため、こちらで音量を決める
   init() {
     try { this.on = localStorage.getItem(BGM_KEY) === '1'; } catch {}
     this.render();
@@ -556,14 +566,21 @@ const bgm = {
       this.el = new Audio('bgm/main.mp3');
       this.el.loop = true;
       this.el.preload = 'none';
-      this.el.volume = this.base;
+      const a = audio();
+      if (a && a.createMediaElementSource) {
+        this.gain = a.createGain();
+        this.gain.gain.value = LEVEL.bgm;
+        a.createMediaElementSource(this.el).connect(this.gain).connect(a.destination);
+      } else {
+        this.el.volume = LEVEL.bgm; // Web Audio が使えない古い端末向け
+      }
     }
     return this.el;
   },
   // 🔊がオフ（全消音）のときや画面を閉じている間は止める
   sync() {
     const want = this.on && !muted && document.visibilityState === 'visible';
-    if (want) { const p = this.ensure().play(); if (p) p.catch(() => {}); }
+    if (want) { audio(); const p = this.ensure().play(); if (p) p.catch(() => {}); } // audio() で一時停止中の音声を再開
     else if (this.el) this.el.pause();
     this.render();
   },
@@ -576,9 +593,13 @@ const bgm = {
   // カットインや声の間だけ音量を下げる
   duck(ms) {
     if (!this.el || this.el.paused) return;
-    this.el.volume = this.base * 0.3;
+    this.setLevel(LEVEL.bgm * LEVEL.bgmDuck);
     clearTimeout(this.duckTimer);
-    this.duckTimer = setTimeout(() => { if (this.el) this.el.volume = this.base; }, ms);
+    this.duckTimer = setTimeout(() => this.setLevel(LEVEL.bgm), ms);
+  },
+  setLevel(v) {
+    if (this.gain) this.gain.gain.setTargetAtTime(v, this.gain.context.currentTime, 0.15); // なめらかに変える
+    else if (this.el) this.el.volume = v;
   },
   render() {
     const b = $('bgmBtn');
